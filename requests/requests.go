@@ -7,22 +7,30 @@ import (
 	"io"
 	"net/http"
 	"time"
+
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 )
 
 var DefaultTLSConfig = tls.Config{InsecureSkipVerify: true}
 
-func Request(method string, url string, headers map[string]string, body io.Reader, timeout int) (Response, error) {
-	return RequestWithTLSConfig(method, url, headers, body, timeout, nil)
+func Request(ctx context.Context, method string, url string, headers map[string]string, body io.Reader, timeout int) (Response, error) {
+	return RequestWithTLSConfig(ctx, method, url, headers, body, timeout, nil)
 }
 
-func RequestWithTLSConfig(method string, url string, headers map[string]string, body io.Reader, timeout int, tlsCfg *tls.Config) (Response, error) {
+func RequestWithTLSConfig(ctx context.Context, method string, url string, headers map[string]string, body io.Reader, timeout int, tlsCfg *tls.Config) (Response, error) {
 	if timeout == 0 {
 		timeout = Timeout
 	}
 	r := Response{}
-	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeout)*time.Second)
+
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, time.Duration(timeout)*time.Second)
 	defer cancel()
-	req, err := http.NewRequest(method, url, body)
+
+	req, err := http.NewRequestWithContext(ctx, method, url, body)
 	if err != nil {
 		return r, err
 	}
@@ -30,15 +38,25 @@ func RequestWithTLSConfig(method string, url string, headers map[string]string, 
 	for k, v := range headers {
 		req.Header.Add(k, v)
 	}
+
 	if tlsCfg == nil {
 		tlsCfg = &DefaultTLSConfig
 	}
-	http.DefaultTransport.(*http.Transport).TLSClientConfig = tlsCfg
-	req = req.WithContext(ctx)
-	resp, err := http.DefaultClient.Do(req)
+
+	transport := &http.Transport{
+		TLSClientConfig: tlsCfg,
+	}
+
+	client := &http.Client{
+		Transport: otelhttp.NewTransport(transport),
+		Timeout:   time.Duration(timeout) * time.Second,
+	}
+
+	resp, err := client.Do(req)
 	if err != nil {
 		return r, err
 	}
+	defer resp.Body.Close()
 
 	buf := new(bytes.Buffer)
 	_, _ = buf.ReadFrom(resp.Body)
@@ -47,23 +65,22 @@ func RequestWithTLSConfig(method string, url string, headers map[string]string, 
 	r.Status = resp.Status
 	r.Body = buf.Bytes()
 	r.Header = resp.Header
-	_ = resp.Body.Close()
 
 	return r, nil
 }
 
-func Get(url string, headers map[string]string, body io.Reader, timeout int) (Response, error) {
-	return Request(http.MethodGet, url, headers, body, timeout)
+func Get(ctx context.Context, url string, headers map[string]string, body io.Reader, timeout int) (Response, error) {
+	return Request(ctx, http.MethodGet, url, headers, body, timeout)
 }
 
-func Post(url string, headers map[string]string, body io.Reader, timeout int) (Response, error) {
-	return Request(http.MethodPost, url, headers, body, timeout)
+func Post(ctx context.Context, url string, headers map[string]string, body io.Reader, timeout int) (Response, error) {
+	return Request(ctx, http.MethodPost, url, headers, body, timeout)
 }
 
-func Put(url string, headers map[string]string, body io.Reader, timeout int) (Response, error) {
-	return Request(http.MethodPut, url, headers, body, timeout)
+func Put(ctx context.Context, url string, headers map[string]string, body io.Reader, timeout int) (Response, error) {
+	return Request(ctx, http.MethodPut, url, headers, body, timeout)
 }
 
-func Delete(url string, headers map[string]string, body io.Reader, timeout int) (Response, error) {
-	return Request(http.MethodDelete, url, headers, body, timeout)
+func Delete(ctx context.Context, url string, headers map[string]string, body io.Reader, timeout int) (Response, error) {
+	return Request(ctx, http.MethodDelete, url, headers, body, timeout)
 }
