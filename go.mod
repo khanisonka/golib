@@ -1,3 +1,3 @@
-module github.com/khanisonka/golib/v1
+module github.com/khanisonka/golib
 
 go 1.20
