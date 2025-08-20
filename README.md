@@ -1,2 +1,2 @@
 # golib
-ต่อยอดตัวอย่างมาจาก github.com/patcharp/golib
+ต่อยอดตัวอย่าง github.com/patcharp/golib
