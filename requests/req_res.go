@@ -9,12 +9,12 @@ import (
 	"go.opentelemetry.io/otel/trace"
 )
 
-type captureTransport struct {
+type traceTransport struct {
 	base     http.RoundTripper
 	maxBytes int
 }
 
-func (t *captureTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+func (t *traceTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	span := trace.SpanFromContext(req.Context())
 
 	if req.Body != nil && req.Body != http.NoBody {

@@ -48,7 +48,7 @@ func RequestWithTLSConfig(ctx context.Context, method string, url string, header
 	}
 
 	client := &http.Client{
-		Transport: &captureTransport{
+		Transport: &traceTransport{
 			base:     otelhttp.NewTransport(transport),
 			maxBytes: 2048,
 		},
