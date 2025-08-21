@@ -47,9 +47,11 @@ func RequestWithTLSConfig(ctx context.Context, method string, url string, header
 		TLSClientConfig: tlsCfg,
 	}
 
+	otelWrapped := otelhttp.NewTransport(transport)
+
 	client := &http.Client{
 		Transport: &traceTransport{
-			base:     otelhttp.NewTransport(transport),
+			base:     otelWrapped,
 			maxBytes: 2048,
 		},
 		Timeout: time.Duration(timeout) * time.Second,
