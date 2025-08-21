@@ -48,8 +48,11 @@ func RequestWithTLSConfig(ctx context.Context, method string, url string, header
 	}
 
 	client := &http.Client{
-		Transport: otelhttp.NewTransport(transport),
-		Timeout:   time.Duration(timeout) * time.Second,
+		Transport: &captureTransport{
+			base:     otelhttp.NewTransport(transport),
+			maxBytes: 2048,
+		},
+		Timeout: time.Duration(timeout) * time.Second,
 	}
 
 	resp, err := client.Do(req)
