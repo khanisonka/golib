@@ -29,19 +29,16 @@ func RequestWithTLSConfig(ctx context.Context, method, url string, headers map[s
 		ctx = context.Background()
 	}
 
-	// อ่าน body ออกมาก่อน เพื่อใช้ทั้ง inject และส่งจริง
 	var bodyBytes []byte
 	if body != nil {
 		bb, _ := io.ReadAll(body)
 		bodyBytes = bb
 	}
 
-	// --- สร้าง client span เอง (แนวทาง A) ---
-	tracer := otel.Tracer("wp-portal-api_external-http")
+	tracer := otel.Tracer("external-api-http")
 	ctxSpan, span := tracer.Start(ctx, "HTTP "+method+" "+url, trace.WithSpanKind(trace.SpanKindClient))
 	defer span.End()
 
-	// สร้าง req ด้วย ctxSpan
 	req, err := http.NewRequestWithContext(ctxSpan, method, url, bytes.NewReader(bodyBytes))
 	if err != nil {
 		span.RecordError(err)
@@ -49,25 +46,22 @@ func RequestWithTLSConfig(ctx context.Context, method, url string, headers map[s
 		return Response{}, err
 	}
 
-	// ใส่ header map ลง req.Header
 	for k, v := range headers {
 		req.Header.Set(k, v)
 	}
 
-	// ✅ Inject ลง req.Header แทน (แก้ error)
 	otel.GetTextMapPropagator().Inject(ctxSpan, propagation.HeaderCarrier(req.Header))
 
-	// เก็บ request.body ไว้ใน "client span"
 	const limit = 4096
 	reqPreview := string(bodyBytes)
 	if len(reqPreview) > limit {
 		reqPreview = reqPreview[:limit] + "...truncated"
 	}
 	span.SetAttributes(
-		attribute.String("http.method", method),
-		attribute.String("http.url", url),
-		attribute.String("http.request.body", reqPreview),
-		attribute.Int("http.request.body.size", len(bodyBytes)),
+		attribute.String("method", method),
+		attribute.String("url", url),
+		attribute.String("request_body", reqPreview),
+		attribute.Int("request_body_size", len(bodyBytes)),
 	)
 
 	if tlsCfg == nil {
@@ -96,9 +90,9 @@ func RequestWithTLSConfig(ctx context.Context, method, url string, headers map[s
 	}
 
 	span.SetAttributes(
-		attribute.Int("http.status_code", resp.StatusCode),
-		attribute.String("http.response.body", respPreview),
-		attribute.Int("http.response.body.size", len(respBytes)),
+		attribute.Int("status_code", resp.StatusCode),
+		attribute.String("response_body", respPreview),
+		attribute.Int("response_body_size", len(respBytes)),
 	)
 	if resp.StatusCode >= 400 {
 		span.SetStatus(codes.Error, "http error")
