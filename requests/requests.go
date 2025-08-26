@@ -17,11 +17,11 @@ import (
 
 var DefaultTLSConfig = tls.Config{InsecureSkipVerify: true}
 
-func Request(ctx context.Context, method string, url string, headers map[string]string, body io.Reader, timeout int) (Response, error) {
-	return RequestWithTLSConfig(ctx, method, url, headers, body, timeout, nil)
+func Request(ctx context.Context, method string, url string, headers map[string]string, body io.Reader, timeout int, service_name string) (Response, error) {
+	return RequestWithTLSConfig(ctx, method, url, headers, body, timeout, nil, service_name)
 }
 
-func RequestWithTLSConfig(ctx context.Context, method, url string, headers map[string]string, body io.Reader, timeout int, tlsCfg *tls.Config) (Response, error) {
+func RequestWithTLSConfig(ctx context.Context, method, url string, headers map[string]string, body io.Reader, timeout int, tlsCfg *tls.Config, service_name string) (Response, error) {
 	if timeout == 0 {
 		timeout = Timeout
 	}
@@ -35,7 +35,7 @@ func RequestWithTLSConfig(ctx context.Context, method, url string, headers map[s
 		bodyBytes = bb
 	}
 
-	tracer := otel.Tracer("external-api")
+	tracer := otel.Tracer("external-api : " + service_name)
 	ctxSpan, span := tracer.Start(ctx, "HTTP "+method+" "+url, trace.WithSpanKind(trace.SpanKindClient))
 	defer span.End()
 
@@ -115,18 +115,18 @@ func preview(s string, limit int) string {
 	return s
 }
 
-func Get(ctx context.Context, url string, headers map[string]string, body io.Reader, timeout int) (Response, error) {
-	return Request(ctx, http.MethodGet, url, headers, body, timeout)
+func Get(ctx context.Context, url string, headers map[string]string, body io.Reader, timeout int, service_name string) (Response, error) {
+	return Request(ctx, http.MethodGet, url, headers, body, timeout, service_name)
 }
 
-func Post(ctx context.Context, url string, headers map[string]string, body io.Reader, timeout int) (Response, error) {
-	return Request(ctx, http.MethodPost, url, headers, body, timeout)
+func Post(ctx context.Context, url string, headers map[string]string, body io.Reader, timeout int, service_name string) (Response, error) {
+	return Request(ctx, http.MethodPost, url, headers, body, timeout, service_name)
 }
 
-func Put(ctx context.Context, url string, headers map[string]string, body io.Reader, timeout int) (Response, error) {
-	return Request(ctx, http.MethodPut, url, headers, body, timeout)
+func Put(ctx context.Context, url string, headers map[string]string, body io.Reader, timeout int, service_name string) (Response, error) {
+	return Request(ctx, http.MethodPut, url, headers, body, timeout, service_name)
 }
 
-func Delete(ctx context.Context, url string, headers map[string]string, body io.Reader, timeout int) (Response, error) {
-	return Request(ctx, http.MethodDelete, url, headers, body, timeout)
+func Delete(ctx context.Context, url string, headers map[string]string, body io.Reader, timeout int, service_name string) (Response, error) {
+	return Request(ctx, http.MethodDelete, url, headers, body, timeout, service_name)
 }
