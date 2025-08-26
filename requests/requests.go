@@ -4,14 +4,14 @@ import (
 	"bytes"
 	"context"
 	"crypto/tls"
-	"fmt"
 	"io"
 	"net/http"
 	"time"
 
-	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/propagation"
 	"go.opentelemetry.io/otel/trace"
 )
 
@@ -29,79 +29,89 @@ func RequestWithTLSConfig(ctx context.Context, method, url string, headers map[s
 		ctx = context.Background()
 	}
 
-	ctx, cancel := context.WithTimeout(ctx, time.Duration(timeout)*time.Second)
-	defer cancel()
+	// อ่าน body ออกมาก่อน เพื่อใช้ทั้ง inject และส่งจริง
+	var bodyBytes []byte
+	if body != nil {
+		bb, _ := io.ReadAll(body)
+		bodyBytes = bb
+	}
 
-	req, err := http.NewRequestWithContext(ctx, method, url, body)
+	// --- สร้าง client span เอง (แนวทาง A) ---
+	tracer := otel.Tracer("wp-portal-api_external-http")
+	ctxSpan, span := tracer.Start(ctx, "HTTP "+method+" "+url, trace.WithSpanKind(trace.SpanKindClient))
+	defer span.End()
+
+	// สร้าง req ด้วย ctxSpan
+	req, err := http.NewRequestWithContext(ctxSpan, method, url, bytes.NewReader(bodyBytes))
 	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
 		return Response{}, err
 	}
+
+	// ใส่ header map ลง req.Header
 	for k, v := range headers {
-		req.Header.Add(k, v)
+		req.Header.Set(k, v)
 	}
+
+	// ✅ Inject ลง req.Header แทน (แก้ error)
+	otel.GetTextMapPropagator().Inject(ctxSpan, propagation.HeaderCarrier(req.Header))
+
+	// เก็บ request.body ไว้ใน "client span"
+	const limit = 4096
+	reqPreview := string(bodyBytes)
+	if len(reqPreview) > limit {
+		reqPreview = reqPreview[:limit] + "...truncated"
+	}
+	span.SetAttributes(
+		attribute.String("http.method", method),
+		attribute.String("http.url", url),
+		attribute.String("http.request.body", reqPreview),
+		attribute.Int("http.request.body.size", len(bodyBytes)),
+	)
 
 	if tlsCfg == nil {
 		tlsCfg = &DefaultTLSConfig
 	}
-	transport := &http.Transport{TLSClientConfig: tlsCfg}
-	otelWrapped := otelhttp.NewTransport(transport)
-
 	client := &http.Client{
-		Transport: otelWrapped,
+		Transport: &http.Transport{TLSClientConfig: tlsCfg},
 		Timeout:   time.Duration(timeout) * time.Second,
-	}
-
-	const limit = 4096
-	if span := trace.SpanFromContext(req.Context()); span != nil {
-		if req.GetBody != nil {
-			if rc, err := req.GetBody(); err == nil && rc != nil {
-				b, _ := io.ReadAll(io.LimitReader(rc, int64(limit)))
-				_ = rc.Close()
-				span.SetAttributes(
-					attribute.String("http.request.body", preview(string(b), limit)),
-					attribute.Int("http.request.body.size", len(b)),
-				)
-			}
-		}
-		span.SetAttributes(
-			attribute.String("http.method", method),
-			attribute.String("http.url", url),
-		)
 	}
 
 	resp, err := client.Do(req)
 	if err != nil {
-		if span := trace.SpanFromContext(req.Context()); span != nil {
-			span.RecordError(err)
-			span.SetStatus(codes.Error, err.Error())
-		}
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
 		return Response{}, err
 	}
 	defer resp.Body.Close()
 
 	buf := new(bytes.Buffer)
 	_, _ = buf.ReadFrom(resp.Body)
+	respBytes := buf.Bytes()
 
-	r := Response{
+	respPreview := string(respBytes)
+	if len(respPreview) > limit {
+		respPreview = respPreview[:limit] + "...truncated"
+	}
+
+	span.SetAttributes(
+		attribute.Int("http.status_code", resp.StatusCode),
+		attribute.String("http.response.body", respPreview),
+		attribute.Int("http.response.body.size", len(respBytes)),
+	)
+	if resp.StatusCode >= 400 {
+		span.SetStatus(codes.Error, "http error")
+	} else {
+		span.SetStatus(codes.Ok, "OK")
+	}
+
+	return Response{
 		Code:   resp.StatusCode,
 		Status: resp.Status,
-		Body:   buf.Bytes(),
+		Body:   respBytes,
 		Header: resp.Header,
-	}
-
-	if span := trace.SpanFromContext(req.Context()); span != nil {
-		span.SetAttributes(
-			attribute.Int("http.status_code", resp.StatusCode),
-			attribute.String("http.response.body", preview(string(r.Body), limit)),
-			attribute.Int("http.response.body.size", len(r.Body)),
-		)
-		if resp.StatusCode >= 400 {
-			span.SetStatus(codes.Error, fmt.Sprintf("status=%d", resp.StatusCode))
-		} else {
-			span.SetStatus(codes.Ok, "OK")
-		}
-	}
-	return r, nil
+	}, nil
 }
 
 func preview(s string, limit int) string {
