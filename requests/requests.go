@@ -35,7 +35,7 @@ func RequestWithTLSConfig(ctx context.Context, method, url string, headers map[s
 		bodyBytes = bb
 	}
 
-	tracer := otel.Tracer("external-api-http")
+	tracer := otel.Tracer("external-api")
 	ctxSpan, span := tracer.Start(ctx, "HTTP "+method+" "+url, trace.WithSpanKind(trace.SpanKindClient))
 	defer span.End()
 
